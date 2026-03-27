@@ -1,5 +1,178 @@
 {% extends "base.html" %}
 
 {% block content %}
-    
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+
+<div class="feed">
+
+  <div class="feed-header">
+    <h2>Лента</h2>
+    {% if current_user.is_authenticated %}
+      <a class="btn btn-primary" href="/editor">+ Редактор</a>
+    {% endif %}
+  </div>
+
+  {% if not posts %}
+    <div class="feed-empty">
+      <p>Постов пока нет. Будь первым!</p>
+    </div>
+  {% endif %}
+
+  {% for post in posts %}
+  <div class="post-card" id="post-{{ post.id }}">
+
+    <div class="post-header">
+      <div class="post-meta">
+        <span class="post-author">{{ post.user.name or 'Аноним' }}</span>
+        <span class="post-date">{{ post.created_date.strftime('%d.%m.%Y %H:%M') }}</span>
+      </div>
+      <h3 class="post-title">{{ post.title }}</h3>
+      {% if post.description %}
+        <p class="post-description">{{ post.description }}</p>
+      {% endif %}
+    </div>
+
+    <div class="post-files" id="files-{{ post.id }}">
+      {% for pf in post.post_files %}
+      <div class="post-file">
+        <div class="post-file-header" onclick="toggleFile({{ post.id }}, {{ loop.index0 }})">
+          <span class="file-icon">📄</span>
+          <span class="file-name">{{ pf.file.name }}</span>
+          <span class="file-toggle">▼</span>
+        </div>
+        <div class="post-file-body" id="file-body-{{ post.id }}-{{ loop.index0 }}">
+          <textarea class="post-code-editor" id="code-{{ post.id }}-{{ loop.index0 }}">{{ pf.file.get_code() }}</textarea>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="post-run-panel">
+      <div class="post-toolbar">
+        <div class="status">
+          <div class="status-dot idle" id="dot-{{ post.id }}"></div>
+          <span id="status-{{ post.id }}">Ожидание</span>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-primary" onclick="runPost({{ post.id }})">▶ Попробовать</button>
+          <button class="btn-cancel" onclick="clearOutput({{ post.id }})">Очистить</button>
+          {% if current_user.id == post.user_id %}
+            <button class="btn btn-danger" onclick="deletePost({{ post.id }})">Удалить</button>
+          {% endif %}
+        </div>
+      </div>
+      <div class="post-output" id="output-{{ post.id }}"></div>
+    </div>
+
+  </div>
+  {% endfor %}
+
+</div>
+
+<script>
+document.querySelectorAll('.post-code-editor').forEach(ta => {
+  const cm = CodeMirror.fromTextArea(ta, {
+    mode: 'python',
+    theme: 'dracula',
+    lineNumbers: true,
+    readOnly: true,
+    lineWrapping: true,
+  });
+  ta._cm = cm;
+});
+
+function toggleFile(postId, index) {
+  const body = document.getElementById(`file-body-${postId}-${index}`);
+  const toggle = body.previousElementSibling.querySelector('.file-toggle');
+  const isOpen = body.classList.toggle('open');
+  toggle.textContent = isOpen ? '▲' : '▼';
+  if (isOpen) {
+    body.querySelector('.CodeMirror').CodeMirror.refresh();
+  }
+};
+
+async function runPost(postId) {
+  const dot = document.getElementById(`dot-${postId}`);
+  const statusEl = document.getElementById(`status-${postId}`);
+  const outputEl = document.getElementById(`output-${postId}`);
+
+  const firstTextarea = document.querySelector(`#files-${postId} .post-code-editor`);
+  const code = firstTextarea._cm
+    ? firstTextarea._cm.getValue()
+    : firstTextarea.value;
+
+  outputEl.textContent = '';
+  dot.className = 'status-dot running';
+  statusEl.textContent = 'Выполняется...';
+
+  try {
+    const res = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      outputEl.textContent = data.error || 'Ошибка';
+      dot.className = 'status-dot error';
+      statusEl.textContent = 'Ошибка';
+      return;
+    }
+
+    const source = new EventSource(`/api/stream/${data.task_id}`);
+    source.onmessage = (event) => {
+      const result = JSON.parse(event.data);
+      source.close();
+      if (result.error) {
+        outputEl.textContent = result.error;
+        dot.className = 'status-dot error';
+        statusEl.textContent = 'Ошибка';
+      } else {
+        outputEl.textContent = result.stdout || '(нет вывода)';
+        if (result.stderr) outputEl.textContent += '\n\nSTDERR:\n' + result.stderr;
+        dot.className = 'status-dot done';
+        statusEl.textContent = 'Готово';
+      }
+    };
+    source.onerror = () => {
+      source.close();
+      outputEl.textContent = 'Ошибка соединения';
+      dot.className = 'status-dot error';
+      statusEl.textContent = 'Ошибка';
+    };
+  } catch (err) {
+    outputEl.textContent = 'Ошибка: ' + err.message;
+    dot.className = 'status-dot error';
+    statusEl.textContent = 'Ошибка';
+  }
+}
+
+async function deletePost(postId) {
+    try {
+        const res = await fetch(`/posts/${postId}`, { method: 'DELETE' })
+        if (!res.ok){
+            alert('Ошибка, попробуйте заново')
+            return
+        }
+        post = document.getElementById(`post-${postId}`)
+        post.remove()
+        alert('Пост был успешно удалён')
+    } catch (err) {
+        alert('Ошибка, попробуйте заново позже или обратитесь в поддержку')
+    }
+}
+
+function clearOutput(postId) {
+  document.getElementById(`output-${postId}`).textContent = '';
+  document.getElementById(`dot-${postId}`).className = 'status-dot idle';
+  document.getElementById(`status-${postId}`).textContent = 'Ожидание';
+}
+</script>
+
 {% endblock content %}

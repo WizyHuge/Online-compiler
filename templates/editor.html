@@ -8,31 +8,82 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
 
-<div class="status">
-  <div class="status-dot idle" id="status-dot"></div>
-  <span id="status-text">Ожидание</span>
+<div class="editor-page">
+
+  <div class="status">
+    <div class="status-dot idle" id="status-dot"></div>
+    <span id="status-text">Ожидание</span>
+    <span class="file-saved" id="save-indicator"></span>
+  </div>
+
+  <div class="editor-layout">
+
+    <div class="pane-file">
+      <div class="pane-header">
+        Файлы
+        <button class="btn-icon" id="new-file-btn" title="Новый файл">＋</button>
+      </div>
+      <ul class="file-list" id="file-list"></ul>
+      <div class="file-actions">
+        <button class="btn btn-primary" id="publish-btn">↑ Опубликовать</button>
+      </div>
+    </div>
+
+    <div class="pane" id="editor-pane">
+      <div class="pane-header">
+        <span id="current-file-name">Выбери файл</span>
+        <button class="btn-icon" id="save-btn" title="Сохранить">💾</button>
+        <button class="btn-icon btn-icon-danger" id="delete-file-btn" title="Удалить файл">🗑</button>
+      </div>
+      <textarea id="editor"></textarea>
+    </div>
+
+    <div class="pane">
+      <div class="pane-header">Вывод</div>
+      <div id="output"></div>
+      <div class="toolbar">
+        <button id="run-btn">▶ Запустить</button>
+        <button id="clear-btn">Очистить</button>
+      </div>
+    </div>
+
+  </div>
 </div>
 
-<div class="editor-layout">
-  <div class="pane-file">
-
+<div class="modal-overlay" id="new-file-modal">
+  <div class="modal">
+    <h3>Новый файл</h3>
+    <input class="form-control" type="text" id="new-file-name" placeholder="main.py"/>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="new-file-confirm">Создать</button>
+      <button class="btn btn-cancel" id="new-file-cancel">Отмена</button>
+    </div>
   </div>
+</div>
 
-  <div class="pane">
-    <div class="pane-header">Редактор</div>
-    <textarea id="editor">print("Hello, World!")</textarea>
-  </div>
-
-  <div class="pane">
-    <div class="pane-header">Вывод</div>
-    <div id="output"></div>
-    <div class="toolbar">
-      <button id="run-btn">▶ Запустить</button>
-      <button id="clear-btn" onclick="document.getElementById('output').textContent=''">Очистить</button>
+<div class="modal-overlay" id="publish-modal">
+  <div class="modal">
+    <h3>Опубликовать пост</h3>
+    <div class="form-group">
+      <label>Заголовок</label>
+      <input class="form-control" type="text" id="post-title" placeholder="Название поста"/>
+    </div>
+    <div class="form-group">
+      <label>Описание</label>
+      <textarea class="form-control" id="post-description" placeholder="Что делает этот код?"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Файлы</label>
+      <div class="file-checkboxes" id="file-checkboxes"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="publish-confirm">Опубликовать</button>
+      <button class="btn btn-cancel" id="publish-cancel">Отмена</button>
     </div>
   </div>
 </div>
 
 <script src="{{ url_for('static', filename='script.js') }}"></script>
+<script src="{{ url_for('static', filename='editor.js') }}"></script>
 
 {% endblock content %}

@@ -23,7 +23,7 @@ class Post(SqlAlchemyBase):
     created_date = sqlalchemy.Column(sqlalchemy.DateTime, default=datetime.datetime.now)
 
     user = orm.relationship('User', back_populates='posts')
-    post_files = orm.relationship('PostFile', backref='post', order_by=PostFile.order)
+    post_files = orm.relationship('PostFile', backref='post', order_by=PostFile.order, cascade='all, delete-orphan')
 
     @property
     def files(self):

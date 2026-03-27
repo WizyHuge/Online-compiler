@@ -1,11 +1,13 @@
 # ______________import_____________
-from flask import Flask, request, jsonify, render_template, Response, url_for, redirect
-from flask_login import login_user, login_required, logout_user, LoginManager
+from flask import Flask, request, jsonify, render_template, Response, url_for, redirect, g
+from flask_login import login_user, login_required, logout_user, LoginManager, current_user
 
 from forms.login_form import LoginForm
 from forms.register_form import RegisterForm
 
 from data.users import User
+from data.file import File
+from data.posts import Post, PostFile
 from data import db
 
 import redis
@@ -27,17 +29,159 @@ login_manager.init_app(app)
 
 @login_manager.user_loader
 def load_user(user_id):
-    db_sess = db.create_session()
+    db_sess = get_db()
     return db_sess.get(User, user_id)
 
 @app.route('/')
 def index():
-    return render_template('index.html', title='Main Page')
+    db_sess = get_db()
+    all_posts = db_sess.query(Post).order_by(Post.created_date.desc()).all()
+    return render_template('index.html', posts=all_posts, title='Главная')
 
 @app.route('/editor')
 @login_required
 def editor():
     return render_template('editor.html', title='Editor')
+
+@app.route('/posts/create', methods=['GET', 'POST'])
+@login_required
+def create_post():
+    db_sess = get_db()
+
+    if request.method == 'POST':
+        data = request.get_json()
+        title = data.get('title', '').strip()
+        description = data.get('description', '').strip()
+        file_ids = data.get('file_ids', [])
+
+        if not title or not file_ids:
+            return jsonify({"error": "Укажи заголовок и хотя бы один файл"}), 400
+
+        user_files = db_sess.query(File).filter(
+            File.id.in_(file_ids),
+            File.user_id == current_user.id
+        ).all()
+
+        if len(user_files) != len(file_ids):
+            return jsonify({"error": "Один из файлов не найден"}), 403
+
+        post = Post()
+        post.user_id = current_user.id
+        post.title = title
+        post.description = description
+        db_sess.add(post)
+        db_sess.flush()
+
+        for order, file_id in enumerate(file_ids):
+            pf = PostFile()
+            pf.post_id = post.id
+            pf.file_id = file_id
+            pf.order = order
+            db_sess.add(pf)
+
+        db_sess.commit()
+        return jsonify({"id": post.id}), 201
+
+    user_files = db_sess.query(File).filter(File.user_id == current_user.id).all()
+    return render_template('create_post.html', files=user_files, title='Новый пост')
+
+@app.route('/posts/<int:post_id>/files', methods=["GET"])
+def get_post_files(post_id):
+    db_sess = get_db()
+    post = db_sess.query(Post).filter(Post.id == post_id).first()
+    if not post:
+        return jsonify({"error": "Пост не найден"}), 404
+    return jsonify([
+        {"id": pf.file.id, "name": pf.file.name, "code": pf.file.get_code()}
+        for pf in post.post_files
+    ])
+    
+@app.route('/posts/<int:post_id>', methods=["DELETE"])
+@login_required
+def delete_post(post_id):
+    db_sess = get_db()
+    post = db_sess.query(Post).filter(Post.id == post_id).first()
+    if not post:
+        return jsonify({"error": "Пост не найден"}), 404
+    db_sess.delete(post)
+    db_sess.commit()
+    return jsonify({"ok": True})
+    
+@app.route('/api/files', methods=['GET'])
+@login_required
+def get_files():
+    db_sess = get_db()
+    user_files = db_sess.query(File).filter(File.user_id == current_user.id).all()
+    return jsonify([
+        {"id": f.id, "name": f.name, "created_date": str(f.created_date)}
+        for f in user_files
+    ])
+
+
+@app.route('/api/files', methods=['POST'])
+@login_required
+def create_file():
+    data = request.get_json()
+    name = data.get('name', 'main.py').strip()
+    code = data.get('code', '')
+
+    db_sess = get_db()
+    f = File()
+    f.user_id = current_user.id
+    f.name = name
+    f.set_code(code)
+    db_sess.add(f)
+    db_sess.commit()
+    return jsonify({"id": f.id, "name": f.name}), 201
+
+
+@app.route('/api/files/<int:file_id>', methods=['GET'])
+@login_required
+def get_file(file_id):
+    db_sess = get_db()
+    f = db_sess.query(File).filter(
+        File.id == file_id,
+        File.user_id == current_user.id
+    ).first()
+    if not f:
+        return jsonify({"error": "Файл не найден"}), 404
+    return jsonify({"id": f.id, "name": f.name, "code": f.get_code()})
+
+
+@app.route('/api/files/<int:file_id>', methods=['PUT'])
+@login_required
+def update_file(file_id):
+    db_sess = get_db()
+    f = db_sess.query(File).filter(
+        File.id == file_id,
+        File.user_id == current_user.id
+    ).first()
+    if not f:
+        return jsonify({"error": "Файл не найден"}), 404
+
+    data = request.get_json()
+    if 'name' in data:
+        f.name = data['name'].strip()
+    if 'code' in data:
+        f.set_code(data['code'])
+
+    db_sess.commit()
+    return jsonify({"ok": True})
+
+
+@app.route('/api/files/<int:file_id>', methods=['DELETE'])
+@login_required
+def delete_file(file_id):
+    db_sess = get_db()
+    f = db_sess.query(File).filter(
+        File.id == file_id,
+        File.user_id == current_user.id
+    ).first()
+    if not f:
+        return jsonify({"error": "Файл не найден"}), 404
+    db_sess.delete(f)
+    db_sess.commit()
+    return jsonify({"ok": True})
 
 @app.route("/api/run", methods=["POST"])
 def run_code():
@@ -78,7 +222,7 @@ def stream(task_id):
 def login():
     form = LoginForm()
     if form.validate_on_submit():
-        db_session = db.create_session()
+        db_session = get_db()
         user = db_session.query(User).filter(User.email == form.email.data).first()
         if user and user.check_password(form.password.data):
             login_user(user, remember=form.remember_me.data)
@@ -96,7 +240,7 @@ def reqister():
             return render_template('register.html', title='Регистрация',
                                    form=form,
                                    message="Пароли не совпадают")
-        db_sess = db.create_session()
+        db_sess = get_db()
         if db_sess.query(User).filter(User.email == form.email.data).first():
             return render_template('register.html', title='Регистрация',
                                    form=form,
@@ -117,7 +261,17 @@ def reqister():
 def logout():
     logout_user()
     return redirect('/')
-    
+
+def get_db():
+    if 'db_sess' not in g:
+        g.db_sess = db.create_session()
+    return g.db_sess
+
+@app.teardown_appcontext
+def close_db(error):
+    db_sess = g.pop('db_sess', None)
+    if db_sess is not None:
+        db_sess.close()
     
 
 # ______________start_____________
