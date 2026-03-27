@@ -1,7 +1,7 @@
 import datetime
 import sqlalchemy
+import sqlalchemy.orm as orm
 from .db import SqlAlchemyBase
-from sqlalchemy import orm
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -16,8 +16,8 @@ class User(SqlAlchemyBase, UserMixin):
     hashed_password = sqlalchemy.Column(sqlalchemy.String, nullable=True)
     created_date = sqlalchemy.Column(sqlalchemy.DateTime, default=datetime.datetime.now)
 
-    def __repr__(self):
-        return f'{self.id} | {self.name if self.name else "Имя не указано"} | {self.email if self.email else "Почта не указана"}'
+    files = orm.relationship('File', back_populates='user')
+    posts = orm.relationship('Post', back_populates='user')
 
     def set_password(self, password):
         self.hashed_password = generate_password_hash(password)
