@@ -1,17 +1,16 @@
 # ______________import_____________
-from flask import Flask, render_template, url_for, request, jsonify
+from flask import Flask, request, jsonify, render_template, Response, url_for
 
-import tempfile
-import subprocess
-import os
-import sys
-
-from data import db
+import redis
+import json
+import uuid
+import time
 
 
 #_______________init_______________
 
 app = Flask(__name__)
+r = redis.Redis(host="localhost", port=6379, decode_responses=True)
 
 # ______________routes____________
 
@@ -19,7 +18,6 @@ app = Flask(__name__)
 def index():
     return render_template('index.html', title='Main page')
 
-@app.route('/api/run')
 @app.route("/api/run", methods=["POST"])
 def run_code():
     data = request.get_json()
@@ -28,42 +26,38 @@ def run_code():
     if not code.strip():
         return jsonify({"error": "Код пустой"}), 400
 
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        suffix=".py",
-        delete=False
-    ) as f:
-        f.write(code)
-        tmp_path = f.name
+    ip = request.remote_addr
+    rate_key = f"rate:{ip}"
+    count = r.incr(rate_key)
+    if count == 1:
+        r.expire(rate_key, 60)
+    if count > 5:
+        return jsonify({"error": "Слишком много запросов, подожди минуту"}), 429
 
-    try:
-        result = subprocess.run(
-            [sys.executable, tmp_path],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        return jsonify({
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "returncode": result.returncode
-        })
+    task_id = str(uuid.uuid4())
+    task = {"id": task_id, "code": code}
+    r.lpush("tasks", json.dumps(task))
 
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": f"Превышено время выполнения ({10}с)"}), 408
+    return jsonify({"task_id": task_id})
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+@app.route("/api/stream/<task_id>")
+def stream(task_id):
+    def generate():
+        for _ in range(150):
+            result = r.get(f"result:{task_id}")
+            if result:
+                yield f"data: {result}\n\n"
+                return
+            time.sleep(0.1)
+        yield f"data: {json.dumps({'error': 'Таймаут выполнения'})}\n\n"
 
-    finally:
-        os.unlink(tmp_path)
+    return Response(generate(), mimetype="text/event-stream")
 
 
 
 # ______________start_____________
 def main():
-    db.global_init("db/database.db")
     app.run(debug=True)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

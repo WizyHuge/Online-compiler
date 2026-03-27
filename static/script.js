@@ -1,51 +1,82 @@
-async function runCode() {
-    const code = document.getElementById("code").value;
-    const output = document.getElementById("output");
-    const btn = document.getElementById("run-btn");
+const editor = CodeMirror.fromTextArea(document.getElementById("editor"), {
+  mode: "python",
+  theme: "dracula",
+  lineNumbers: true,
+  indentUnit: 4,
+  tabSize: 4,
+  indentWithTabs: false,
+  autoCloseBrackets: true,
+  lineWrapping: true,
+});
 
-    if (!code.trim()) {
-        setOutput("Введите код для выполнения", "error");
-        return;
+const runBtn = document.getElementById("run-btn");
+const output = document.getElementById("output");
+const statusDot = document.getElementById("status-dot");
+const statusText = document.getElementById("status-text");
+
+function setStatus(state) {
+  statusDot.className = "status-dot " + state;
+  const labels = {
+    idle: "Ожидание",
+    running: "Выполняется...",
+    done: "Готово",
+    error: "Ошибка",
+  };
+  statusText.textContent = labels[state] || "";
+}
+
+runBtn.addEventListener("click", async () => {
+  const code = editor.getValue();
+  if (!code.trim()) return;
+
+  output.textContent = "";
+  runBtn.disabled = true;
+  setStatus("running");
+
+  try {
+    const res = await fetch("/api/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      output.textContent = data.error || "Ошибка сервера";
+      setStatus("error");
+      return;
     }
 
-    btn.disabled = true;
-    setOutput("Выполняется...", "loading");
+    const taskId = data.task_id;
 
-    try {
-        const response = await fetch("/api/run", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code })
-        });
+    const source = new EventSource(`/api/stream/${taskId}`);
 
-        const data = await response.json();
+    source.onmessage = (event) => {
+      const result = JSON.parse(event.data);
+      source.close();
 
-        if (data.error) {
-            setOutput(`${data.error}`, "error");
-        } else if (data.stderr) {
-            setOutput(data.stderr, "error");
-        } else {
-            setOutput(data.stdout || "(нет вывода)", "success");
+      if (result.error) {
+        output.textContent = result.error;
+        setStatus("error");
+      } else {
+        output.textContent = result.stdout || "(нет вывода)";
+        if (result.stderr) {
+          output.textContent += "\n\nSTDERR:\n" + result.stderr;
         }
+        setStatus("done");
+      }
+    };
 
-    } catch (err) {
-        setOutput(`Ошибка соединения: ${err.message}`, "error");
-    } finally {
-        btn.disabled = false;
-    }
-}
-
-function clearAll() {
-    document.getElementById("code").value = "";
-    setOutput("Результат появится здесь...", "");
-}
-
-function setOutput(text, status) {
-    const output = document.getElementById("output");
-    output.textContent = text;
-    output.className = status;
-}
-
-document.addEventListener("keydown", (e) => {
-    if (e.ctrlKey && e.key === "Enter") runCode();
+    source.onerror = () => {
+      source.close();
+      output.textContent = "Ошибка соединения";
+      setStatus("error");
+    };
+  } catch (err) {
+    output.textContent = "Ошибка: " + err.message;
+    setStatus("error");
+  } finally {
+    runBtn.disabled = false;
+  }
 });

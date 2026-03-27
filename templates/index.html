@@ -1,21 +1,38 @@
 {% extends "base.html" %}
 
-{% block content%}
+{% block content %}
 
-<div class="container">
-    <h2>🐍 Python Компилятор</h2>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
 
-    <textarea id="code" placeholder="Введи код...">print("Hello, World!")</textarea>
+<header>
+  <div class="status">
+    <div class="status-dot idle" id="status-dot"></div>
+    <span id="status-text">Ожидание</span>
+  </div>
+</header>
 
+<div class="main">
+  <div class="pane">
+    <div class="pane-header">Редактор</div>
+    <textarea id="editor">print("Hello, World!")</textarea>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="pane">
+    <div class="pane-header">Вывод</div>
+    <div id="output"></div>
     <div class="toolbar">
-        <button id="run-btn" onclick="runCode()">Запустить</button>
-        <button id="clear-btn" onclick="clearAll()">Очистить</button>
+      <button id="run-btn">Запустить</button>
+      <button id="clear-btn" onclick="document.getElementById('output').textContent=''">Очистить</button>
     </div>
-
-    <div class="output-label">Результат:</div>
-    <div id="output">Результат появится здесь...</div>
+  </div>
 </div>
 
 <script src="{{ url_for('static', filename='script.js') }}"></script>
 
-{% endblock content%}
+{% endblock content %}
